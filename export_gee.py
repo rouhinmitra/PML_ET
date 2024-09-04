@@ -180,6 +180,32 @@ b,met,ts_cold,ts_hot,rn_hot,g_hot=runsebal(ls_first)
 # b_export.projection().getInfo()
 #%% Exporting 
 bands=["B","R","GR","NIR","SWIR_1","SWIR_2",'ST_B10',"NDVI","NDWI","ALFA",'Tao_sw_1',"Rs_down","Rl_down","Rl_up","Rn","G","H","LE","ET_24h"]
+
+def make_features(img_collection,band):
+    tmp = img_collection.expression(
+      str(band)+'*LST', {
+              band : img_collection.select(band),
+              'LST': img_collection.select("ST_B10") }).rename(band+'_LST')
+    return img_collection.addBands([tmp])  
+b=make_features(b,"B")
+b=make_features(b,"GR")
+b=make_features(b,"R")
+b=make_features(b,"NIR")
+b=make_features(b,"NDVI")
+b=make_features(b,"NDWI")
+b=make_features(b,"SWIR_1")
+b=make_features(b,"SWIR_2")
+
+#%%
+b.select("R")
+#%%       
+
+# bands=["B","R","GR","NIR","SWIR_1","SWIR_2",'ST_B10',"NDVI","NDWI","ALFA",'Tao_sw_1',"Rs_down","Rl_down","Rl_up","Rn","G","H","LE","ET_24h"]
+# bands=["B","R","GR","NIR","SWIR_1","SWIR_2",'ST_B10',"NDVI","NDWI",\
+#     "B_LST","GR_LST","R_LST","NIR_LST","NDVI_LST","NDWI_LST",\
+#         "SWIR_1_LST","SWIR_2_LST","Rn","G","H","LE","ET_24h"]
+bands=["B_LST","GR_LST","R_LST","NIR_LST","NDVI_LST","NDWI_LST",\
+        "SWIR_1_LST","SWIR_2_LST"]
 for band in bands:
     # Select the band
     band_image = b.select(band)
@@ -188,10 +214,11 @@ for band in bands:
     export_params = {
         'image': band_image.toFloat(),
         'description': f'Landsat_{band}',
-        'folder': 'EarthEngineImages',
+        'folder': 'EarthEngineImages_crs',
         'scale': 30,  # Resolution in meters
         'fileFormat': 'GeoTIFF',
-        'region': b.geometry().bounds().getInfo()['coordinates']
+        'region': b.geometry().bounds().getInfo()['coordinates'],
+        'crs': "EPSG:4326"
     }
     
     # Export the band to Google Drive
@@ -210,3 +237,109 @@ def print_task_status():
     for task in task_list:
         print(f"Task {task.id} ({task.config['description']}): {task.state}")
 print_task_status()
+#%% Export landcover
+landcover = ee.ImageCollection("ESA/WorldCover/v200")
+landcover.select("Map")
+
+# Select the band
+band_image = landcover.select("Map").first()
+
+# Define export parameters
+export_params = {
+    'image': band_image.toFloat(),
+    'description': "Landcover",
+    'folder': 'EarthEngineImages_crs',
+    'scale': 30,  # Resolution in meters
+    'fileFormat': 'GeoTIFF',
+    'region': b.geometry().bounds().getInfo()['coordinates'],
+    'crs': "EPSG:4326"
+}
+
+# Export the band to Google Drive
+task = ee.batch.Export.image.toDrive(**export_params)
+task.start()
+
+print(f"Exporting Landcover band to Google Drive...")
+# %%
+elev=ee.Image("USGS/SRTMGL1_003")
+band_image = elev.select("elevation")
+
+# Define export parameters
+export_params = {
+    'image': band_image.toFloat(),
+    'description': "Elevation",
+    'folder': 'EarthEngineImages_crs',
+    'scale': 30,  # Resolution in meters
+    'fileFormat': 'GeoTIFF',
+    'region': b.geometry().bounds().getInfo()['coordinates'],
+    'crs': "EPSG:4326"
+}
+
+# Export the band to Google Drive
+task = ee.batch.Export.image.toDrive(**export_params)
+task.start()
+
+print(f"Exporting elevation band to Google Drive...")
+slope=ee.Terrain.slope(elev)
+
+# Define export parameters
+export_params = {
+    'image': slope.toFloat(),
+    'description': "Slope",
+    'folder': 'EarthEngineImages_crs',
+    'scale': 30,  # Resolution in meters
+    'fileFormat': 'GeoTIFF',
+    'region': b.geometry().bounds().getInfo()['coordinates'],
+    'crs': "EPSG:4326"
+}
+
+# Export the band to Google Drive
+task = ee.batch.Export.image.toDrive(**export_params)
+task.start()
+print(f"Exporting Slope band to Google Drive...")
+# %% EXport Canopy Height resampled to 30m
+canopy_height = ee.ImageCollection("projects/meta-forest-monitoring-okw37/assets/CanopyHeight").mosaic()
+
+# Select the band
+# band_image = landcover.select("Map").first()
+
+# Define export parameters
+export_params = {
+    'image': canopy_height.toFloat(),
+    'description': "canopy_height",
+    'folder': 'EarthEngineImages_crs',
+    'scale': 30,  # Resolution in meters
+    'fileFormat': 'GeoTIFF',
+    'region': b.geometry().bounds().getInfo()['coordinates'],
+    'crs': "EPSG:4326"
+}
+# Export the band to Google Drive
+task = ee.batch.Export.image.toDrive(**export_params)
+task.start()
+print(f"Exporting canopy height band to Google Drive...")
+#%%  Soil data
+clay_mean = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').first();
+ksat_mean = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').first();
+sand_mean = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').first();
+silt_mean = ee.ImageCollection('projects/sat-io/open-datasets/polaris/silt_mean').first();
+
+# Define export parameters
+def export_fn(image,description):
+        export_params = {
+        'image': image.toFloat(),
+        'description': description,
+        'folder': 'EarthEngineImages_crs',
+        'scale': 30,  # Resolution in meters
+        'fileFormat': 'GeoTIFF',
+        'region': b.geometry().bounds().getInfo()['coordinates'],
+        'crs': "EPSG:4326"
+        }
+        # Export the band to Google Drive
+        task = ee.batch.Export.image.toDrive(**export_params)
+        task.start()
+        print(f"Exporting band to Google Drive...")
+export_fn(clay_mean,"clay")
+export_fn(sand_mean,"sand")
+export_fn(silt_mean,"silt")
+export_fn(ksat_mean,"ksat")
+# %%

@@ -27,9 +27,10 @@ def preprocess_data(df):
     print(df[["Lat","Long"]])
     # print(df[["Veg","Name"]].dropna())
     df["doy"]=pd.to_datetime(df['Datetime']).dt.dayofyear
+    df["Date"]=pd.to_datetime(df["Datetime"]).dt.date
     df=df[df["LE_closed"]>=0]
-    df=df[df["LE_inst_af"]>=0]
-    df=df[df["H_inst_af"]>=0]
+    # df=df[df["Rn"]>=0]
+    # df=df[df["H_inst_af"]>=0]
     if df.shape[0]!=0:
         df["Veg"]=df["Veg"].dropna().iloc[0]
         if "latitude" in df.columns:
@@ -71,10 +72,53 @@ def add_landcover(df,landcover_data):
 
     return df
 
-def add_eto():
-    return
+# def add_openET(list_ameriflux,list_openet):
+#     """Merge OpenET daily results with the ameriflux data available"""
+#     st=[]
+#     for i in range(len(list_ameriflux)):
+#         if "Name_x" in list_ameriflux[i].columns:
+#             list_ameriflux[i]=list_ameriflux[i].drop(columns={"Name_x","Name_y",'Unnamed: 0_x'})
+#         if list_ameriflux[i].shape[0]!=0:
+#             for j in range(len(list_openet)):
+#                 if list_ameriflux[i]["Name"].iloc[0]==list_openet[j]["Name"].iloc[0]:
+#                     print(list_ameriflux[i]["Name"].iloc[0])
+#                     st.append(pd.merge(list_ameriflux[i],list_openet[j],on="Date",how="left"))
+#     return st
+
+def add_openET(list_ameriflux, list_openet):
+    """Merge OpenET daily results with the AmeriFlux data available."""
+    st = []
+    
+    # Convert list_openet to a dictionary for faster lookup by Name
+    openet_dict = {df["Name"].iloc[0]: df for df in list_openet}
+    
+    for ameriflux_df in list_ameriflux:
+        if ameriflux_df.shape[0]!=0:
+            ameriflux_name = ameriflux_df["Name"].iloc[0]
+            
+            if ameriflux_name in openet_dict:
+                openet_df = openet_dict[ameriflux_name]
+                
+                # Drop the 'Name' column from openet_df to avoid duplication
+                openet_df_clean = openet_df.drop(columns=["Name", "Unnamed: 0"], errors='ignore')
+                
+                # Merge the dataframes on the "Date" column
+                merged_df = pd.merge(ameriflux_df, openet_df_clean, on="Date", how="left", suffixes=('_ameriflux', '_openet'))
+                
+                # Keep the 'Name' column from ameriflux_df
+                merged_df["Name"] = ameriflux_name
+                print(merged_df)
+                st.append(merged_df)
+            else:
+                print(f"No matching OpenET data for {ameriflux_name}")
+    
+    return st
 
 def calc_eto_hourly():
+    return
+
+def add_eto():
+
     return
 
 def add_terrain(df,terrain_data):
@@ -88,21 +132,34 @@ def add_terrain(df,terrain_data):
 
     return df
 
-def add_canopy_height(df):
-    """Simard et al Has missing shrublands  """
+def add_canopy_height(df,canopy_data):
+    """WRI and meta data """
+    if df.shape[0]!=0:
+        for i in range(canopy_data.shape[0]):
+            if df.Name.iloc[0]==canopy_data["Name"].iloc[i]:
+                df["Canopy_height"]=canopy_data["Canopy_height"].iloc[i]
 
-    return 
+    return df
     
-def add_soil_data():
+def add_soil_data(df,soil_data):
     """
-    Polaris 
+    Polaris data: soil, clay and silt percent and Ks 
     """
-    return 
+    if df.shape[0]!=0:
+        for i in range(soil_data.shape[0]):
+            if df.Name.iloc[0]==soil_data["Name"].iloc[i]:
+                df["clay_percent"]=soil_data["Clay_percent"].iloc[i]
+                df["silt_percent"]=soil_data["Silt_percent"].iloc[i]
+                df["sand_percent"]=soil_data["Sand_percent"].iloc[i]
+                df["Ksat"]=soil_data["Ksat"].iloc[i]
+
+    return df
 
 def summary_df(listofdf,outdir):
     summary_list = []
     
     for df in listofdf:
+        print(df["Name"])
         # Assuming each dataframe has 'name', 'latitude', and 'longitude' columns
         summary = df[['Name', 'Lat', 'Long']].drop_duplicates()
         summary_list.append(summary)
@@ -134,7 +191,7 @@ def remove_na_from_main_features(df):
     "Elev_SRTM",
     "Slope_SRTM",
     "Landcover_wc",
-    "doy","Rn","Ginst","H_inst_af"]
+    "doy","Rn","Ginst","LE_closed"]
     if df.shape[0]!=0:
         df=df.dropna(subset=main_features)
 
@@ -173,21 +230,41 @@ data=[preprocess_data(index) for index in data]
 data=[calculate_mixed_features(data[index]) for index in range(len(data)) if data[index].shape[0]!=0]
 landcover=pd.read_csv("D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\Landcover\\Worldcover_GEE.csv")
 terrain=pd.read_csv("D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\Terrain\\Terrain.csv")
-
-data=[add_landcover(index,landcover) for index in data]
-data=[add_terrain(index,terrain) for index in data]
-data=[remove_na_from_main_features(index) for index in data]
-
+canopy_height=pd.read_csv("D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\Canopy_height\\Global_canopy_height.csv")
+soil=pd.read_csv("D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\Soil_data\\Soil_polaris.csv")
+os.chdir("D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\OpenET_New\\")
+## Read open ET
+file_list_openet=os.listdir()
+openet=[]
+for i in range(len(file_list_openet)):
+    openet.append(pd.read_csv(file_list_openet[i]))
+    openet[i]["Date"]=pd.to_datetime(openet[i]["Date"]).dt.date
+    openet[i]["Name"]=file_list_openet[i].split(".")[0]
+# print(soil,canopy_height)
+# data=[add_landcover(index,landcover) for index in data]
+# data=[add_canopy_height(index,canopy_height) for index in data]
+# data=[add_terrain(index,terrain) for index in data]
+# data=[add_soil_data(index,soil) for index in data]
+# data=[remove_na_from_main_features(index) for index in data]
 data_dir="D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\ML\\ML_processed_data_all\\"
 for df in data:
     if df.shape[0]!=0:
+        print(df.shape[0])
         df.to_csv(data_dir+df.Name.iloc[0]+".csv")
-# summary_df(data,"D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\Ameriflux_summary_ML.csv")
+data=add_openET(data,openet)
+for df in data:
+    if df.shape[0]!=0:
+        print(df.shape[0])
+        df.to_csv(data_dir+df.Name.iloc[0]+".csv")
+summary_df(data,"D:\\Backup\\Rouhin_Lenovo\\US_project\\GEE_SEBAL_Project\\Ameriflux_summary_ML.csv")
 #%%
 for df in data:
     if df.shape[0]!=0:
-        print((df["Rn_inst_af"]-df["G_inst_af"]-df["H_inst_af"]-df["LE_inst_af"]).describe(),df["Name"].iloc[0])
+        print(df.columns)
+        # print((df["Rn_inst_af"]-df["G_inst_af"]-df["H_inst_af"]-df["LE_inst_af"]).describe(),df["Name"].iloc[0])
         # print(df[["LEinst","Hinst","Ginst","Rn"]].describe())
         # print((df["Rn"]-df["Ginst"]).min())
-pd.concat(data).shape
+# pd.concat(data).shape
+# file_list[0].split(".")[0]
 # %%
+data[1][["ST_B10","ETa"]]
